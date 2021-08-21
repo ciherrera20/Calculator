@@ -1,8 +1,8 @@
 # #!/usr/bin/env python 
-import Interpreter2
+import Interpreter
 import sys
 import traceback
-from Scope2 import NoNewline
+from Scope import NoNewline
 import re
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import run_in_terminal
@@ -26,7 +26,7 @@ def _(event):
 
 if __name__ == '__main__':
     session = PromptSession()
-    interpreter = Interpreter2.get_global_interpreter(interface=True)
+    interpreter = Interpreter.get_global_interpreter(interface=True)
     current_line = 0
     print('Enter expression:')
     sys.setrecursionlimit(3000)

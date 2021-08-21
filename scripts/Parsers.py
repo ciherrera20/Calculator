@@ -1,4 +1,5 @@
 from functools import reduce
+from Lexer import Token, tokenize
 
 def terminal(t):
     '''
@@ -174,331 +175,187 @@ def label(parser, *, label, gathered=False, collapsed=False, forced=False):
         return (pos_set, new_tree_dict)
     return labeled_parser
 
-def terminal_class(tokens):
-    return orelse(*[terminal(token) for token in tokens])
+def eat(parser):
+    def eaten_parser(tokens, pos):
+        pos_set, tree_dict = parser(tokens, pos)
+        new_tree_dict = {}
+        for pos in pos_set:
+            new_tree_dict[pos] = ()
+        return (pos_set, new_tree_dict)
+    return eaten_parser
 
-def neg_terminal_class(tokens):
-    return terminal_type(lambda s: s not in tokens)
+def one_or_more(parser):
+    repeated_parser = orelse(
+        then(parser, lambda *x: repeated_parser(*x)),
+        parser,
+        keep=True
+    )
+    return repeated_parser
 
-def terminal_sequence(tokens):
-    return then(*[terminal(token) for token in tokens])
+def zero_or_more(parser):
+    repeated_parser = orelse(
+        then(parser, lambda *x: repeated_parser(*x)),
+        empty,
+        keep=True
+    )
+    return repeated_parser
 
-def boundary(terminals, include_empty=True):
-    def boundary_parser(tokens, pos):
-        if include_empty:
-            to_add = ((),)
-        else:
-            to_add = ()
-        if pos - 1 < 0 or tokens[pos - 1] not in terminals:
-            if pos < len(tokens) and tokens[pos] in terminals:
-                return ({pos}, {pos: to_add})
-            else:
-                return (set(), {})
-        elif pos >= len(tokens) or tokens[pos] not in terminals:
-            if tokens[pos - 1] in terminals:
-                return ({pos}, {pos: to_add})
-            else:
-                return (set(), {})
-        else:
-            return(set(), {})
-    return boundary_parser
+number = memoize(terminal_type(Token.is_number))
+word = memoize(terminal_type(Token.is_word))
+open_paren = memoize(eat(terminal_type(Token.is_value('('))))
+close_paren = memoize(eat(terminal_type(Token.is_value(')'))))
+period = memoize(eat(terminal_type(Token.is_value('.'))))
+comma = memoize(eat(terminal_type(Token.is_value(','))))
+equal_sign = memoize(eat(terminal_type(Token.is_value('='))))
+semi_colon = memoize(eat(terminal_type(Token.is_value(';'))))
 
-word_char_ls = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'
+name = memoize(label(then(
+    word, zero_or_more(then(period, word))
+), label='name'))
 
-# Define some boundaries, i.e. zero length matches
-word_break = boundary(word_char_ls, include_empty=False)
-start_word_boundary = boundary(word_char_ls[10:], include_empty=False)
-
-# Guard a word by surrounding it with word breaks
-def guarded_sequence(sequence):
-    return then(word_break, terminal_sequence(sequence), word_break)
-
-#------------------------ Basic definitions ------------------------#
-
-# Parse a digit
-digit = memoize(terminal_class('0123456789'))
-
-# Parse one or more digits
-digits = memoize(orelse(
-    digit,
-    then(digit, lambda *x: digits(*x))
+unary_op = memoize(label(
+    terminal_type(Token.is_unary_operator),
+    label='operator'
 ))
 
-# Parse a decimal place
-decimal_place = memoize(terminal('.'))
-
-# Parse a number possibly with a decimal place
-number = memoize(label(orelse(
-    then(decimal_place, digits),
-    then(digits, decimal_place),
-    then(digits, decimal_place, digits),
-    digits,
-    guarded_sequence('NaN'),
-    guarded_sequence('Inf')
-), label='number'))
-
-# A word character
-word_char = memoize(terminal_class(word_char_ls))
-
-# 0 or more word characters
-word_chars = memoize(orelse(
-    empty,
-    word_char,
-    then(word_char, lambda *x: word_chars(*x))
-))
-
-# A word is defined as a non-digit and non-period word character followed by zero or more word characters
-word = memoize(label(then(
-    start_word_boundary,
-    terminal_class('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'),
-    word_chars,
-    word_break,
-), label='word'))
-
-name = memoize(label(orelse(
-    word,
-    then(word, terminal('.'), lambda *x: name(*x))
-), label='name', gathered=True))
-
-# Match a single whitespace token
-whitespace_token = memoize(terminal_type(lambda s: s.isspace()))
-
-# Parse whitespace
-whitespace = memoize(label(keep(orelse(
-    empty,
-    whitespace_token,
-    then(whitespace_token, lambda *x: whitespace(*x))
-)), label='whitespace', gathered=True))
-
-# Define unary operators
-unary_op = memoize(label(orelse(
-    terminal_class('+-!'),
-    guarded_sequence('not')
-), label='unary_operator'))
-
-# Define a binary_operand as a unary_operand followed by one or more unary operators
 binary_operand = memoize(label(orelse(
-    lambda *x: unary_operand(*x),
-    then(whitespace, unary_op, lambda *x: binary_operand(*x)),
+    # lambda *x: unary_operand(*x),
+    # then(unary_op, lambda *x: binary_operand(*x)),
+    then(zero_or_more(unary_op), lambda *x: unary_operand(*x)),
+    keep=True
 ), label='operand', collapsed=True))
 
-# unary_operand = number
-
-# Define the number of levels of precedence of operators
 num_prec_ops = 7
-
-# Use more verbose names
-# prec_op_labels = ['prec{}_op'.format(i) for i in range(num_prec_ops)]
-# prec_exp_labels = ['prec{}_exp'.format(i) for i in range(num_prec_ops)]
-
-# Use less verbose names
 prec_op_labels = ['operator'] * num_prec_ops
 prec_exp_labels = ['infix'] * num_prec_ops
 
-# Define the operators of different precedences
-prec0_op = memoize(label(terminal_class('^'), label=prec_op_labels[0]))
-prec1_op = memoize(label(terminal_class('*/%'), label=prec_op_labels[1]))
-prec2_op = memoize(label(terminal_class('+-'), label=prec_op_labels[2]))
-prec3_op = memoize(label(orelse(
-    terminal_class('><'),
-    then(terminal_class('><'), terminal('=')),
-), label=prec_op_labels[3]))
-prec4_op = memoize(label(orelse(
-    then(terminal_class('=!'), terminal('=')),
-    guarded_sequence('eq'),
-    guarded_sequence('neq'),
-), label=prec_op_labels[4]))
-prec5_op = memoize(label(guarded_sequence('and'), label=prec_op_labels[5]))
-prec6_op = memoize(label(guarded_sequence('or'), label=prec_op_labels[6]))
+prec0_op = memoize(label(terminal_type(Token.is_value('^')), label=prec_op_labels[0]))
+prec1_op = memoize(label(terminal_type(Token.is_value('*', '/', '%')), label=prec_op_labels[1]))
+prec2_op = memoize(label(terminal_type(Token.is_value('+', '-')), label=prec_op_labels[2]))
+prec3_op = memoize(label(terminal_type(Token.is_value('>', '<', '>=', '<=')), label=prec_op_labels[3]))
+prec4_op = memoize(label(terminal_type(Token.is_value('!=', '==', 'eq', 'neq')), label=prec_op_labels[4]))
+prec5_op = memoize(label(terminal_type(Token.is_value('and')), label=prec_op_labels[5]))
+prec6_op = memoize(label(terminal_type(Token.is_value('or')), label=prec_op_labels[6]))
+prec_ops = [prec0_op, prec1_op, prec2_op, prec3_op, prec4_op, prec5_op, prec6_op]
 
-# Create the expression parsers that correspond to each operator
-# This only works for left-associative operators
 def create_precedence_expressions(prec_ops, *, labels):
-    # List out expressions of lower precedence
-    # def list_lower_prec_exps(exps, op):
-    #     ls = []
-    #     for exp in exps:
-    #         ls += [
-    #             then(exp, whitespace, op, binary_operand),
-    #             then(binary_operand, whitespace, op, exp),
-    #             then(exp, whitespace, op, exp)
-    #         ]
-    #     return ls
-    
-    # Lambda wrapper to store the correct parser index in a closure, since the parser itself does not yet exist
-    def lambda_wrapper(i):
+    def exp_wrapper(i):
         return lambda *x: prec_exps[i](*x)
-
-    # Create the expression parsers
+    
     prec_exps = []
     for i, (prec_op, the_label) in enumerate(zip(prec_ops, labels)):
-        lower = orelse(*prec_exps)
-        exp = lambda_wrapper(i)
-        prec_exps.append(
-            # Don't forget to memoize left recursive parsers!
-            memoize(label(orelse(
-                then(binary_operand, whitespace, prec_op, binary_operand),
-                then(exp, whitespace, prec_op, binary_operand),
-                then(exp, whitespace, prec_op, lower),
-                then(lower, whitespace, prec_op, binary_operand),
-                then(binary_operand, whitespace, prec_op, lower),
-                then(lower, whitespace, prec_op, lower),
-            ), label=the_label))
-            # memoize(label(orelse(
-            #     then(binary_operand, whitespace, prec_op, binary_operand),
-            #     then(lambda_wrapper(i), whitespace, prec_op, binary_operand),
-            #     *list_lower_prec_exps(prec_exps, prec_op),
-            # ), label=the_label))
-        )
+        if i == 0:
+            previous = binary_operand
+        else:
+            previous = exp_wrapper(i - 1)
+        prec_exps.append(memoize(label(
+            then(previous, zero_or_more(then(prec_op, previous))),
+            label=the_label,
+            collapsed=True
+        )))
     return prec_exps
 
-# Create the expression parsers
-prec_ops = [prec0_op, prec1_op, prec2_op, prec3_op, prec4_op, prec5_op, prec6_op]
-prec_exps = create_precedence_expressions(
-    prec_ops,
-    labels=prec_exp_labels
-)
+prec_exps = create_precedence_expressions(prec_ops, labels=prec_exp_labels)
 
-# wrapped_expression = memoize(label(then(
-#     whitespace,
-#     terminal('('),
-#     lambda *x: expression(*x),
-#     whitespace,
-#     terminal(')'),
-# ), label='expression', gathered=True))
-
-wrapped_expression = memoize(then(
-    whitespace,
-    terminal('('),
-    lambda *x: expression(*x),
-    whitespace,
-    terminal(')'),
-))
-
-expression = memoize(label(keep(orelse(
+expression = memoize(label(orelse(
+    prec_exps[-1],
+    then(open_paren, lambda *x: word_list(*x), close_paren),
     empty,
-    then(whitespace, terminal('('), lambda *x: word_list(*x), whitespace, terminal(')')),
-    binary_operand,
-    *[parser for parser in prec_exps],
-)), label='expression', forced=True))
+    keep=True
+), label='expression', forced=True))
 
-expression_list = memoize(orelse(
-    then(expression, whitespace, terminal(','), expression),
-    then(expression, whitespace, terminal(','), lambda *x: expression_list(*x)),
+wrapped_expression = memoize(label(then(
+    open_paren,
+    expression,
+    close_paren,
+), label='expression', gathered=True))
+
+
+expression_list = memoize(then(
+    expression, one_or_more(then(comma, expression))
 ))
 
 wrapped_expression_list = memoize(then(
-    whitespace, terminal('('), expression_list, whitespace, terminal(')')
+    open_paren,
+    expression_list,
+    close_paren,
 ))
 
 array = memoize(label(then(
-    whitespace, terminal('['), label(orelse(expression, expression_list), label='array', forced=True), whitespace, terminal(']')
-), label='array', gathered=True))
+    eat(terminal_type(Token.is_value('['))),
+    orelse(expression_list, expression, keep=True),
+    eat(terminal_type(Token.is_value(']')))
+), label='array', forced=True))
 
 callable = memoize(orelse(
-    then(whitespace, name),
+    lambda *x: index(*x),
     wrapped_expression,
-    lambda *x: index(*x)
+    name,
 ))
 
-callee = memoize(orelse(
+callee = memoize(label(orelse(
+    then(open_paren, close_paren),
     wrapped_expression,
-    wrapped_expression_list
-))
+    wrapped_expression_list,
+    keep=True
+), label='params', forced=True))
 
-called = memoize(then(
-    callable, callee
-))
-
-function_call = memoize(label(orelse(
-    called,
-    then(lambda *x: function_call(*x), callee),
+function_call = memoize(label(then(
+    callable, one_or_more(callee)
 ), label='function_call'))
 
 indexable = memoize(orelse(
-    then(whitespace, name),
-    array,
     function_call,
-    wrapped_expression
-))
-
-indexed = memoize(then(
-    indexable, array
-))
-
-index = memoize(label(orelse(
-    indexed,
-    then(lambda *x: index(*x), array),
-), label='index'))
-
-composable_unary_operand = memoize(label(orelse(
-    then(whitespace, number),
     wrapped_expression,
     array,
-    function_call,
-    then(whitespace, name),
-    index,
-), label='operand'))
+    name
+))
 
-implicit_mult = memoize(label(orelse(
-    then(lambda *x: implicit_mult(*x), composable_unary_operand),
-    then(composable_unary_operand, composable_unary_operand),
+index = memoize(label(then(
+    indexable, one_or_more(array)
+), label='index'))
+
+composable_unary_operand = memoize(keep(label(orelse(
+    index,
+    function_call,
+    array,
+    name,
+    wrapped_expression,
+    number,
+    keep=True
+), label='operand')))
+
+implicit_mult = memoize(label(then(
+    composable_unary_operand, one_or_more(composable_unary_operand)
 ), label='implicit_mult'))
 
-unary_operand = memoize(orelse(
+unary_operand = memoize(keep(orelse(
     implicit_mult,
     composable_unary_operand,
-))
+)))
 
 word_list = memoize(label(orelse(
+    then(word, zero_or_more(then(comma, word))),
     empty,
-    then(whitespace, word),
-    then(whitespace, word, whitespace, terminal(','), lambda *x: word_list(*x)),
-), label='word_list', gathered=True, forced=True))
+    keep=True
+), label='word_list', forced=True))
 
 function_def = memoize(label(then(
-    whitespace, word,
-    whitespace, terminal('('), word_list, whitespace, terminal(')'),
-    whitespace, terminal('='),
-    expression,
+    word, open_paren, word_list, close_paren, equal_sign, expression
 ), label='function_def'))
 
-var_def = memoize(label(keep(orelse(
-    then(whitespace, word, whitespace, terminal('='), expression),
-    then(whitespace, word, whitespace, terminal('='), lambda *x: var_def(*x)),
-)), label='var_def'))
+var_def = memoize(label(then(
+    # word, equal_sign, orelse(lambda *x: var_def(*x), expression, keep=True)
+    one_or_more(then(word, equal_sign)), expression
+), label='var_def'))
 
-# # import_statement = memoize(orelse(
-
-# # ))
-
-line = memoize(label(then(
-    orelse(expression, function_def, var_def),
-    whitespace,
+line = memoize(label(orelse(
+    function_def,
+    var_def,
+    expression,
+    keep=True
 ), label='line'))
 
-program = memoize(label(keep(orelse(
-    line,
-    then(line, terminal(';'), lambda *x: program(*x)),
-)), label='program', gathered=True))
-
-# Simple grammar that defines order of operations
-mult_op = label(terminal('*'), label='operator')
-mult_int = memoize(orelse(
-    then(mult_op, terminal('x'), lambda *x: mult_int(*x)),
-    empty,
-    keep=True
-))
-mult = memoize(label(then(
-    terminal('x'), mult_int
-), label='infix', collapsed=True))
-
-add_op = label(terminal('+'), label='operator')
-add_int = memoize(orelse(
-    then(add_op, mult, lambda *x: add_int(*x)),
-    empty,
-    keep=True
-))
-add = memoize(label(then(
-    mult, add_int
-), label='infix', collapsed=True))
+program = memoize(label(then(
+    line, zero_or_more(then(semi_colon, line))
+), label='program'))

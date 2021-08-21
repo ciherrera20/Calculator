@@ -1,104 +1,96 @@
 from Parsers import program
 import numpy as np
 import Scope
+import Function
+from Lexer import Token, tokenize
+from functools import reduce
 
-def remove_nodes(tree, *, labels):
-    if len(tree) < 2:
-        return tree
-    else:
-        if tree[0] in labels:
-            return None
+class ExpressionWrapper():
+    def __init__(self, expression, interpreter):
+        self._expression = expression
+        self._interpreter = interpreter
+    
+    def get_AST(self):
+        return self._expression
+
+    def eval(self, err_msg='Did not expect a{}'):
+        value = self._interpreter.evaluate_AST(self._expression)
+        if type(value) == list:
+            raise ValueError(err_msg.format(' word list'))
+        elif value is None:
+            raise ValueError(err_msg.format('n empty expression'))
         else:
-            new_tree = (tree[0],)
-            for subtree in tree[1:]:
-                node = remove_nodes(subtree, labels=labels)
-                if node is not None:
-                    new_tree += (node,)
-            return new_tree
+            return value
 
-def remove_leaves(tree, *, type_func):
-    if len(tree) == 0:
-        return tree
-    elif len(tree) == 1:
-        if type_func(tree[0]):
-            return None
-        else:
-            return tree
-    else:
-        new_tree = (tree[0],)
-        for subtree in tree[1:]:
-            node = remove_leaves(subtree, type_func=type_func)
-            if node is not None:
-                new_tree += (node,)
-        return new_tree
-
-def collapse_leaves(tree):
-    '''
-    Join adjacent leaves into single leaves with their values concatenated
-    '''
-    if len(tree) < 2:
-        return tree
-    else:
-        new_tree = []
-        for subtree in tree[1:]:
-            if len(subtree) == 1:
-                if len(new_tree) == 0 or len(new_tree[-1]) != 1:
-                    new_tree.append(subtree)
-                else:
-                    new_tree[-1]= (new_tree[-1][0] + subtree[0],)
-            else:
-                new_tree.append(collapse_leaves(subtree))
-        return (tree[0], *new_tree)
+    def to_word_list(self):
+        return self._interpreter.get_word_list(self._expression)
+    
+    def get_scope(self):
+        return self._interpreter._scope
 
 class Interpreter():
     def __init__(self, scope):
         self._scope = scope
 
-    def _get_AST(self, string):
-        pos_set, tree_dict = program(string, 0)
-        if len(string) not in pos_set:
-            if len(pos_set) == 0:
-                raise ValueError('Syntax error')
-            else:
-                error_pos = max(pos_set)
-                line_no = string[:error_pos + 1].count('\n')
-                line_pos = error_pos
-                if line_no > 0:
-                    i = error_pos
-                    while string[i] != '\n':
-                        i -= 1
-                    line_pos = line_pos - i - 1
-                raise ValueError('Unexpected token \'{}\' at position {} on line {}'.format(string[error_pos], line_pos, line_no))
-        else:
-            tree = tree_dict[len(string)][0]
-            AST = remove_nodes(tree, labels=['whitespace'])
-            AST = remove_leaves(AST, type_func=lambda t: t in '()[];,')
-            AST = collapse_leaves(AST)
-            AST = remove_leaves(AST, type_func=lambda t: t in '.=')
-            return AST
-
-    def _evaluate_nodes(self, tree, leaf_callback, callback_dict):
-        if len(tree) < 2:
-            return leaf_callback(tree)
-        else:
-            return callback_dict[tree[0]](*tree[1:])
-
-    def _evaluate_leaf(self, leaf):
-        raise ValueError('Why is there a leaf here?')
+    def evaluate(self, string):
+        return self.evaluate_AST(self._get_AST(string))
 
     def evaluate_AST(self, AST):
         if AST == ():
             return None
         else:
-            return self._evaluate_nodes(AST, self._evaluate_leaf, {
+            return self._evaluate_node(AST, self._evaluate_leaf, {
                 'program': self._evaluate_program,
                 'expression': self._evaluate_expression
             })
 
+    def get_word_list(self, expression):
+        try:
+            wl = self._evaluate_node(expression, self._evaluate_leaf, {
+                'expression': self._evaluate_word_list_expression
+            })
+            if wl is None:
+                return []
+            elif type(wl) == str:
+                if '.' in wl:
+                    return None
+                else:
+                    return [wl]
+            else:
+                return wl
+        except KeyError:
+            return None
+
+    def _get_AST(self, string):
+        tokens = tokenize(string)
+        pos_set, tree_dict = program(tokens, 0)
+        if len(tokens) not in pos_set:
+            if len(pos_set) == 0:
+                raise ValueError('Syntax error')
+            else:
+                error_pos = max(pos_set)
+                raise ValueError('Unexpected token \'{}\''.format(tokens[error_pos]))
+        else:
+            tree = tree_dict[len(tokens)]
+            if tree == ():
+                return tree
+            else:
+                return tree[0]
+
+    def _evaluate_node(self, tree, leaf_callback, callback_dict):
+        if len(tree) < 2:
+            return leaf_callback(tree)
+        else:
+            elems = tree[1:]
+            return callback_dict[tree[0]](*tree[1:])
+
+    def _evaluate_leaf(self, leaf):
+        raise ValueError('Why is there a leaf here?')
+
     def _evaluate_program(self, *lines):
         results = []
         for line in lines:
-            results.append(self._evaluate_nodes(line, self._evaluate_leaf, {
+            results.append(self._evaluate_node(line, self._evaluate_leaf, {
                 'line': self._evaluate_line
             }))
         return results[-1]
@@ -107,7 +99,7 @@ class Interpreter():
         if rest == ():
             return None
         else:
-            value = self._evaluate_nodes(rest, self._evaluate_leaf, {
+            value = self._evaluate_node(rest, self._evaluate_leaf, {
                 'var_def': self._evaluate_var_def,
                 'function_def': self._evaluate_function_def,
                 'expression': self._evaluate_expression
@@ -116,244 +108,224 @@ class Interpreter():
                 raise ValueError('A word list is not a valid line')
             return value
 
-    def _evaluate_word(self, leaf):
-        return leaf[0]
-
-    def _evaluate_var_def(self, word, rest):
-        word = self._evaluate_nodes(word, self._evaluate_leaf, {
-            'word': self._evaluate_word
-        })
-        value = self._evaluate_nodes(rest, self._evaluate_leaf, {
-            'var_def': self._evaluate_var_def,
-            'expression': self._evaluate_expression
-        })
-        if value is None:
+    def _evaluate_var_def(self, *args):
+        if len(args) == 1:
             raise ValueError('No value given for variable definition')
-        elif type(value) == list:
-            raise ValueError('A variable cannot be a word list')
-        return self._scope.set_value(word, value)
+        value = self._evaluate_node(args[-1], self._evaluate_leaf, {
+            'expression': self._evaluate_valid_expression('A variable cannot be a{}')
+        })
+        for arg in args[:-1]:
+            self._scope.set_value(arg[0].value, value)
+        return value
 
-    def _evaluate_word_list(self, *words):
-        if words[0] == ():
+    def _evaluate_word_list(self, *args):
+        if len(args) == 1 and args[0] == ():
             return []
-        return [self._evaluate_nodes(word, self._evaluate_leaf, {
-            'word': self._evaluate_word
-        }) for word in words]
+        else:
+            return [arg[0].value for arg in args]
 
     def _evaluate_function_def(self, word, word_list, definition):
-        function_name = self._evaluate_nodes(word, self._evaluate_leaf, {
-            'word': self._evaluate_word
-        })
-        param_names = self._evaluate_nodes(word_list, self._evaluate_leaf, {
+        function_name = word[0].value
+        param_names = self._evaluate_node(word_list, self._evaluate_leaf, {
             'word_list': self._evaluate_word_list
         })
-        user_function = Scope.UserFunction(function_name, param_names, definition, self._scope)
+        user_function = Function.UserFunction(function_name, param_names, definition, self._scope)
         self._scope.set_value(function_name, user_function)
         return None
 
-    def _evaluate_expression(self, rest):
-        if rest == ():
+    def _evaluate_expression(self, AST):
+        if AST == ():
             return None
         else:
-            return self._evaluate_nodes(rest, self._evaluate_leaf, {
-                'infix': self._evaluate_binary_infix,
-                'operand': self._evaluate_operand,
+            return self._evaluate_node(AST, self._evaluate_leaf, {
+                'infix': self._evaluate_infix,
+                'word_list': self._evaluate_word_list
+            })
+    
+    def _evaluate_valid_expression(self, error_msg):
+        def _evaluator(AST):
+            value = self._evaluate_expression(AST)
+            if type(value) == list:
+                raise ValueError(error_msg.format(' word list'))
+            elif value is None:
+                raise ValueError(error_msg.format('n empty expression'))
+            else:
+                return value
+        return _evaluator
+    
+    def _evaluate_word_list_expression(self, AST):
+        if AST == ():
+            return None
+        else:
+            return self._evaluate_node(AST, self._evaluate_leaf, {
+                'infix': self._evaluate_word_list_expression,
+                'operand': self._evaluate_word_list_expression,
+                'expression': self._evaluate_word_list_expression,
+                'name': self._retrieve_name,
                 'word_list': self._evaluate_word_list
             })
 
-    def _evaluate_binary_infix(self, operand1, operator, operand2):
-        values = []
-        for operand in [operand1, operand2]:
-            values.append(self._evaluate_nodes(operand, self._evaluate_leaf, {
-                'operand': self._evaluate_operand,
-                'infix': self._evaluate_binary_infix
-            }))
-        operator_func = self._evaluate_nodes(operator, self._evaluate_leaf, {
+    def _evaluate_infix(self, *args):
+        values = [self._evaluate_node(arg, self._evaluate_leaf, {
+            'infix': self._evaluate_infix,
+            'operand': self._evaluate_operand,
             'operator': self._evaluate_operator
-        })
-        return operator_func(*values)
+        }) for arg in args]
+        if (len(values) - 1) % 2 != 0:
+            raise ValueError('Invalid number of infix arguments... good job Chris this shouldn\'t be possible at all')
+        while len(values) > 1:
+            value1, func, value2 = values[:3]
+            values = [func(value1, value2)] + values[3:]
+        return values[0]
 
-    def _evaluate_operator(self, leaf):
-        operator_str = leaf[0]
-        if operator_str == '^':
+    def _evaluate_operator(self, operator):
+        raw = operator[0].value
+        if raw == '^':
             return np.power
-        elif operator_str == '*':
+        elif raw == '*':
             return np.multiply
-        elif operator_str == '/':
+        elif raw == '/':
             return np.divide
-        elif operator_str == '%':
+        elif raw == '%':
             return np.mod
-        elif operator_str == '+':
+        elif raw == '+':
             return np.add
-        elif operator_str == '-':
+        elif raw == '-':
             return np.subtract
-        elif operator_str == '>':
+        elif raw == '>':
             return np.greater
-        elif operator_str == '<':
+        elif raw == '<':
             return np.less
-        elif operator_str == '>=':
+        elif raw == '>=':
             return np.greater_equal
-        elif operator_str == '<=':
+        elif raw == '<=':
             return np.less_equal
-        elif operator_str == '==' or operator_str == 'eq':
+        elif raw == '==' or raw == 'eq':
             return np.equal
-        elif operator_str == '!=' or operator_str == 'neq':
+        elif raw == '!=' or raw == 'neq':
             return np.not_equal
-        elif operator_str == 'and':
+        elif raw == 'and':
             return np.logical_and
-        elif operator_str == 'or':
+        elif raw == 'or':
             return np.logical_or
         else:
             raise ValueError('Unknown operator')
 
-    def _evaluate_operand(self, *rest):
-        if len(rest) > 1:
-            operator_func = self._evaluate_nodes(rest[0], self._evaluate_leaf, {
-                'unary_operator': self._evaluate_unary_operator
-            })
-            value = self._evaluate_nodes(rest[1], self._evaluate_leaf, {
-                'operand': self._evaluate_operand
-            })
-            return operator_func(value)
-        else:
-            value = self._evaluate_nodes(rest[0], self._evaluate_leaf, {
-                'implicit_mult': self._evaluate_implicit_mult,
-                'number': self._evaluate_number,
-                'name': self._evaluate_name,
-                'expression': self._evaluate_expression,
-                'array': self._evaluate_array,
-                'function_call': self._evaluate_function_call,
-                'index': self._evaluate_index
-            })
-            if value is None:
-                raise ValueError('An empty expression cannot be an operand')
-            return value
-
-    def _evaluate_unary_operator(self, leaf):
-        operator_str = leaf[0]
-        if operator_str == '+':
+    def _evaluate_unary_operator(self, operator):
+        raw = operator[0].value
+        if raw == '+':
             return np.positive
-        elif operator_str == '-':
+        elif raw == '-':
             return np.negative
-        elif operator_str == '!' or operator_str == 'not':
+        elif raw == '!' or raw == 'not':
             return np.logical_not
         else:
             raise ValueError('Unknown unary operator')
 
-    def _evaluate_implicit_mult(self, operand1, operand2):
-        values = []
-        for operand in [operand1, operand2]:
-            values.append(self._evaluate_nodes(operand, self._evaluate_leaf, {
-                'operand': self._evaluate_operand,
-                'implicit_mult': self._evaluate_implicit_mult
-            }))
-        return np.multiply(*values)
+    def _evaluate_operand(self, *args):
+        if len(args) > 1:
+            ops = [self._evaluate_node(arg, self._evaluate_leaf, {
+                'operator': self._evaluate_unary_operator
+            }) for arg in args[:-1]]
+            value = self._evaluate_node(args[-1], self._evaluate_leaf, {
+                'operand': self._evaluate_operand
+            })
+            for op in reversed(ops):
+                value = op(value)
+            return value
+        else:
+            # If the only argument is a leaf, then it can only be a number, so return its value
+            if len(args[0]) == 1:
+                return args[0][0].value
+            else:
+                return self._evaluate_node(args[0], self._evaluate_leaf, {
+                    'implicit_mult': self._evaluate_implicit_mult,
+                    'index': self._evaluate_index,
+                    'function_call': self._evaluate_function_call,
+                    'array': self._evaluate_array,
+                    'name': self._evaluate_name,
+                    'expression': self._evaluate_valid_expression('A{} cannot be an operand'),
+                })
 
-    def _evaluate_number(self, leaf):
-        return np.float(leaf[0])
+    def _evaluate_implicit_mult(self, *args):
+        values = [
+            self._evaluate_node(arg, self._evaluate_leaf, {
+                'operand': self._evaluate_operand
+            }) for arg in args
+        ]
+        return reduce(np.multiply, values[1:], values[0])
 
-    def _evaluate_name(self, *words):
-        words = [self._evaluate_nodes(word, self._evaluate_leaf, {
-            'word': self._evaluate_word
-        }) for word in words]
-        name = '.'.join(words)
+    def _evaluate_name(self, *args):
+        name = self._retrieve_name(*args)
         return self._scope.retrieve_value(name)
     
-    def _retrieve_name(self, *words):
-        words = [self._evaluate_nodes(word, self._evaluate_leaf, {
-            'word': self._evaluate_word
-        }) for word in words]
-        return '.'.join(words)
+    def _retrieve_name(self, *args):
+        return '.'.join([arg[0].value for arg in args])
 
-    def _evaluate_array(self, *expressions):
-        values = [self._evaluate_nodes(expression, self._evaluate_leaf, {
-            'expression': self._evaluate_expression
-        }) for expression in expressions]
-        for value in values:
-            if type(value) == list:
-                raise ValueError('A word list cannot be an array element')
-        if len(values) == 0 and values[0] is None:
-            return np.array()
-        return np.array(values)
+    def _evaluate_array(self, *args):
+        if len(args) == 1 and args[0] == ():
+            return np.array([])
+        else:
+            values = [self._evaluate_node(arg, self._evaluate_leaf, {
+                'expression': self._evaluate_valid_expression('A{} cannot be an array element')
+            }) for arg in args]
+            return np.array(values)
 
-    def _evaluate_function_call(self, callable, *expressions):
-        # raise ValueError('I haven\'t implemented function calls yet')
-        value = self._evaluate_nodes(callable, self._evaluate_leaf, {
-            'expression': self._evaluate_expression,
-            'function_call': self._evaluate_function_call,
+    def _evaluate_param_set(self, *args):
+        if len(args) == 1 and args[0] == ():
+            return []
+        else:
+            return [ExpressionWrapper(arg, self) for arg in args]
+
+    def _evaluate_function_call(self, callable, *args):
+        def empty_err(*x):
+            raise ValueError('An empty expression is not callable')
+        
+        value = self._evaluate_node(callable, self._evaluate_leaf, {
+            'expression': self._evaluate_valid_expression('A{} is not callable'),
+            'params': empty_err,
             'name': self._evaluate_name,
             'index': self._evaluate_index
         })
-        if value is None:
-            raise ValueError('An empty expression is not callable')
-        elif type(value) == list:
-            raise ValueError('A word list is not callable')
-        
-        if isinstance(value, Scope.Function):
-            return value.evaluate(self, self._filter_empty_expressions(expressions))
-        elif len(expressions) > 1:
-            raise ValueError('\'{}\' is not callable'.format(type(value)))
-        else:
-            value2 = self._evaluate_nodes(expressions[0], self._evaluate_leaf, {
-                'expression': self._evaluate_expression
-            })
-            if value2 is None:
-                raise ValueError('Cannot multiply by an empty expression')
-            elif type(value2) == list:
-                raise ValueError('Cannot multiply by a word list')
-            return np.multiply(value, value2)
-    
-    def _filter_empty_expressions(self, expressions):
-        non_empty = []
-        for expression in expressions:
-            if expression[1] != ():
-                non_empty.append(expression)
-        return non_empty
+        param_sets = [self._evaluate_node(arg, self._evaluate_leaf, {
+            'params': self._evaluate_param_set
+        }) for arg in args]
 
-    def _evaluate_index(self, indexable, array):
-        value = self._evaluate_nodes(indexable, self._evaluate_leaf, {
-            'array': self._evaluate_array,
-            'function_call': self._evaluate_function_call,
-            'expression': self._evaluate_expression
-        })
-        if value is None:
-            raise ValueError('An empty expression cannot be indexed')
-        elif type(value) == list:
-            raise ValueError('A word list cannot be indexed')
-        array = self._evaluate_nodes(array, self._evaluate_leaf, {
+        for param_set in param_sets:
+            if isinstance(value, Function.Function):
+                value = value.evaluate(param_set)
+            else:
+                if len(param_set) != 1:
+                    raise ValueError('\'{}\' is not callable'.format(type(value)))
+                else:
+                    value = np.multiply(value, param_set[0].eval('Cannot multiply by a{}'))
+        return value
+
+    def _evaluate_index(self, indexable, *args):
+        value = self._evaluate_node(indexable, self._evaluate_leaf, {
+            'expression': self._evaluate_valid_expression('A{} is not indexable'),
+            'name': self._evaluate_name,
+            'funcion_call': self._evaluate_function_call,
             'array': self._evaluate_array
         })
-        if type(value) != np.ndarray:
-            return np.multiply(value, array)
-        else:
-            int_array = array.astype(np.int32)
-            equivalent = np.ufunc.reduce(np.logical_and, int_array == array, axis=None)
-            if not equivalent:
-                raise ValueError('An array can only be indexed with integers')
+        indices = [self._evaluate_node(arg, self._evaluate_leaf, {
+            'array': self._evaluate_array
+        }) for arg in args]
+
+        for index in indices:
+            if type(value) == np.ndarray:
+                int_array = index.astype(np.int32)
+                equivalent = np.ufunc.reduce(np.logical_and, int_array == index, axis=None)
+                if not equivalent:
+                    raise ValueError('An array can only be indexed with integers')
+                else:
+                    value = value[tuple(int_array)]
             else:
-                return value[tuple(int_array)]
-    
-    def get_word_list(self, expression):
-        if expression[1][0] == 'operand' and expression[1][1][0] == 'expression':
-            if expression[1][1][1] == ():
-                return []
-            elif expression[1][1][1][1][0] == 'name':
-                name = self._evaluate_nodes(expression[1][1][1][1], self._evaluate_leaf, {
-                    'name': self._retrieve_name
-                })
-                if '.' not in name:
-                    return [name]
-        else:
-            word_list = self.evaluate_AST(expression)
-            if type(word_list) == list:
-                return word_list
-        return None
+                value = np.multiply(value, index)
+        return value
 
-    def evaluate(self, string):
-        return self.evaluate_AST(self._get_AST(string))
-
-def get_global_interpreter():
-    return Interpreter(Scope.Scope.get_global_scope())
+def get_global_interpreter(interface=False):
+    return Interpreter(Scope.Scope.get_global_scope(interface=interface))
 
 interpreter = None
 if __name__ == '__main__':
