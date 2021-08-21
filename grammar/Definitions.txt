@@ -1,0 +1,29 @@
+# The CLI calculator's top level construct is an expression:
+(?:Whitespace)(?:(?:[+\-](?:Binary Operand)|(?:Binary Operand))(?:Whitespace)(?:(?:Binary Operator)(?:Whitespace)(?:Binary Operand)(?:Whitespace))*)?
+
+# Whitespace is defined as:
+\s*
+
+# A Binary Operator is defined as:
+==|!=|>=|<=|and|not|leq|geq|eq|or|[+\-*\/^%><]
+
+# A Binary Operand is defined as:
+(?:(?:Unary Operator)(?:Whitespace))*(?:Unary Operand)
+
+# A Unary Operator is defined as:
+not|!
+
+# A Unary Operand is defined as:
+Number|Array|(?:Name|(?:\()Expression(?:\)))(?:(?:\()Expression(?:\))|Function Call)*
+
+# A Number is defined as:
+\d*\.\d+|\d+\.\d*|\d+|NaN|Inf
+
+# A Name is defined as:
+[_a-zA-Z]\w*(?:\.[_a-zA-Z]\w*)*
+
+# A Function Call is defined as:
+\((?:(?:Expression(?:,))*(?:Expression))?\)
+
+# An Array is defined as:
+\[(?:(?:Expression(?:,))*(?:Expression))?\]

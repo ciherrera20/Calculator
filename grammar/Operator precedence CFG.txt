@@ -1,0 +1,42 @@
+# # Context free grammar with operator precedence
+# # Start can be any operation or an expression
+# S = Xs|As|Ms|Es
+# 
+# # Define a number
+# N = 0|1|2|3|4|5|6|7|8|9
+# 
+# # Define an expression as simply a number or a parenthesis group
+# X = sN|s(As)|s(Ms)|s(Es)|s(Xs)
+# 
+# # Define addition
+# A = Xs+X|As+X|Ms+X|Xs+M|Ms+M|Es+X|Xs+E|Es+E
+# 
+# # Define multiplication
+# M = Xs*X|Ms*X|Es*X|Xs*E|Es*E
+# 
+# # Define exponentiation
+# E = Xs^X|Es^X
+# 
+# s = whitespace
+
+# prec0 = ['+', '-', '!', 'not'] # Unary operators precede all others
+# prec1 = ['^']
+# prec2 = ['*', '/', '%']
+# prec3 = ['+', '-']
+# prec4 = ['<', '<=', '>', '>=']
+# prec5 = ['==', 'eq', '!=', 'neq']
+# prec6 = ['and']
+# prec7 = ['or']
+
+S = operand | addition
+
+number = '0'|'1'|'2'|'3'|'4'|'5'|'6'|'7'|'8'|'9'
+s = whitespace
+
+addition = operand '+' operand | addition '+' operand
+
+operand = unary_operator operand | value
+
+unary_operator = '+' | '-'
+
+value = number | '(' addition ')' | '(' value ')'

@@ -1,0 +1,102 @@
+#------------------------ Basic definitions ------------------------#
+# Define a number
+digit = [0-9]
+digits = digit | digit digits
+number = '.' digits | digits '.' | digits '.' digits | digits | word_break 'NaN' word_break | word_break 'Inf' word_break
+
+# Define a word as a sequence of alphanumeric characters not beginning with a digit
+word_char = [a-zA-Z_] | digit
+start_word_char = [a-zA-Z_]
+word_chars = empty | word_char | word_char word_chars
+word = start_word_boundary start_word_char word_chars word_break
+
+# Define name as a sequence of words with periods in between
+name = word | name '.' word
+
+# Any character that returns true for python's isspace function
+whitespace_token = \s
+
+# Abbreviated as \s*
+whitespace = empty | whitespace_token | whitespace_token whitespace
+
+#---------------------- Operator definitions -----------------------#
+unary_op = [+-!] | word_break 'not' word_break
+
+# The name gives each operator's precedence, with lower numbers being evaluated first
+prec0_op = '^'
+prec1_op = [*/%]
+prec2_op = [+-]
+prec3_op = '<' | '>' | '<=' | '>='
+prec4_op = '==' | '!=' | word_break 'neq' word_break | word_break 'eq' word_break
+prec5_op = word_break 'and' word_break
+prec6_op = word_break 'or' word_break
+
+#--------------------- Expression definitions ----------------------#
+# Binary operand is defined further down
+prec0_exp = binary_operand \s* prec0_op binary_operand |
+            prec0_exp \s* prec0_op binary_operand
+
+prec0_lower = prec0_exp
+
+prec1_exp = binary_operand \s* prec1_op binary_operand |
+            prec1_exp \s* prec1_op binary_operand |
+            prec0_lower \s* prec1_op binary_operand |
+            binary_operand \s* prec1_op prec0_lower |
+            prec0_lower \s* prec1_op prec0_lower
+
+prec1_lower = prec1_exp | prec0_lower
+
+prec2_exp = binary_operand \s* prec2_op binary_operand |
+            prec2_exp \s* prec2_op binary_operand |
+            prec1_lower \s* prec2_op binary_operand |
+            binary_operand \s* prec2_op prec1_lower |
+            prec1_lower \s* prec2_op prec1_lower
+
+prec2_lower = prec2_exp | prec1_lower
+
+prec3_exp = binary_operand \s* prec3_op binary_operand |
+            prec3_exp \s* prec3_op binary_operand |
+            prec2_lower \s* prec3_op binary_operand |
+            binary_operand \s* prec3_op prec2_lower |
+            prec2_lower \s* prec3_op prec2_lower
+
+prec3_lower = prec3_exp | prec2_lower
+
+prec4_exp = binary_operand \s* prec4_op binary_operand |
+            prec4_exp \s* prec4_op binary_operand |
+            prec3_lower \s* prec4_op binary_operand |
+            binary_operand \s* prec4_op prec3_lower |
+            prec3_lower \s* prec4_op prec3_lower
+
+prec4_lower = prec4_exp | prec3_lower
+
+prec5_exp = binary_operand \s* prec5_op binary_operand |
+            prec5_exp \s* prec5_op binary_operand |
+            prec4_lower \s* prec5_op binary_operand |
+            binary_operand \s* prec5_op prec4_lower |
+            prec4_lower \s* prec5_op prec4_lower
+
+prec5_lower = prec5_exp | prec4_lower
+
+prec6_exp = binary_operand \s* prec6_op binary_operand |
+            prec6_exp \s* prec6_op binary_operand |
+            prec5_lower \s* prec6_op binary_operand |
+            binary_operand \s* prec6_op prec5_lower |
+            prec5_lower \s* prec6_op prec5_lower
+
+prec6_lower = prec6_exp | prec5_lower
+
+#----------------------- Operand definition ------------------------#
+binary_operand = \s* unary_op binary_operand | unary_operand
+
+unary_operand = \s* number | \s* array | \s* number \s* array | composable_unary_operand | \s* number composable_unary_operand
+
+composable_unary_operand = \s* name | function_call | composable_unary_operand \s* name | composable_unary_operand function_call
+
+expression_list = expression \s* ',' expression | expression \s* ',' expression_list
+
+array = \s* '[' expression \s* ']' | \s* '[' expression_list \s* ']'
+
+function_call = \s* '(' expression_list \s* ')'
+
+expression = \s* | \s* '(' expression \s* ')' \s* | binary_operand \s* | prec6_lower \s*
