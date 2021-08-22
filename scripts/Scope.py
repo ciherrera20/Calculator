@@ -8,10 +8,11 @@ class NoNewline(Exception):
     pass
 
 class Scope():
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, serializable=True):
         self._parent = parent
         self._symbol_table = {}
-    
+        self._serializable = serializable
+
     def retrieve_value(self, name):
         if name in self._symbol_table:
             return self._symbol_table[name][0]
@@ -25,9 +26,53 @@ class Scope():
         if not current_value or (current_value and current_value[1]):
             self._symbol_table[name] = (value, mutable)
         return value
-    
-    def get_global_scope(interface=False):
-        scope = Scope()
+
+    def delete_value(self, name):
+        if name in self._symbol_table:
+            value, mutable = self._symbol_table[name]
+            if mutable:
+                del self._symbol_table[name]
+                return True
+            else:
+                return False
+        elif self._parent is not None:
+            return self._parent.delete_value(name)
+        else:
+            raise ValueError('\'{}\' is not defined'.format(name))
+
+    def serialize(self, path, serialized):
+        # If the scope cannot be serialized, return None
+        if not self._serializable:
+            return None
+        
+        # Otherwise, serialize the scope
+        if self not in serialized:
+            # Store a path to avoid circular references
+            serialized[self] = path
+
+            # Create the serializable object
+            obj = {}
+            if self._parent is not None:
+                new_path = '{}/parent'.format(path)
+                obj['parent'] = self._parent.serialize(new_path, serialized)
+            else:
+                obj['parent'] = None
+            obj['symbol_table'] = {}
+
+            # Populate the serializable object's symbol table
+            for key, (value, mutable) in self._symbol_table.items():
+                if isinstance(value, Function.Function):
+                    new_path = '{}/symbol_table/{}'.format(path, key)
+                    obj['symbol_table'][key] = (value.serialize(new_path, serialized), mutable)
+                else:
+                    obj['symbol_table'][key] = (value, mutable)
+            return obj
+        else:
+            # Return the memoized path
+            return serialized[self]
+
+    def get_global_scope(interface=False, subscope=None):
+        scope = Scope(serializable=False)
         scope.set_value('True', True, mutable=False)
         scope.set_value('False', False, mutable=False)
         scope.set_value('pi', np.pi, mutable=False)
@@ -41,7 +86,7 @@ class Scope():
             else:
                 scope = Scope(parent=word_list.get_scope())
                 func = Function.UserFunction('<anonymous>', param_names, definition.get_AST(), scope)
-                scope.set_value('self', func)
+                scope.set_value('self', func, mutable=False)
                 return func
         Function.BuiltinFunction('lambda', ['param_names', 'expression'], lambda_def).add_to(scope, mutable=False)
 
@@ -81,6 +126,15 @@ class Scope():
                     values.append(exp.eval())
                 return reduce(np.add, values, 0)
         Function.BuiltinFunction('sum', ['index', 'start', 'end', 'expression'], sum_def).add_to(scope, mutable=False)
+
+        # Define the delete function
+        def delete_def(word_list):
+            words = word_list.to_word_list()
+            if words is None or len(words) != 1:
+                raise ValueError('delete expected a single word as its first argument')
+            else:
+                return word_list.get_scope().delete_value(words[0])
+        Function.BuiltinFunction('delete', ['name'], delete_def).add_to(scope, mutable=False)
 
         # Define the ifelse function
         Function.BuiltinFunction('ifelse', ['condition', 'expression_true', 'expression_false'],
@@ -152,4 +206,41 @@ class Scope():
                 raise NoNewline()
             Function.BuiltinFunction('clear', [], clear).add_to(scope, mutable=False)
 
-        return scope
+        if subscope:
+            subscope._parent = scope
+            return subscope
+        else:
+            return Scope(parent=scope)
+    
+    def deserialize(obj, path, deserialized):
+        if path not in deserialized:
+            # Create the scope object and add it to the deserialized dictionary
+            scope = Scope(parent=None, serializable=True)
+            deserialized[path] = scope
+
+            # Get the parent scope
+            parent = obj['parent']
+            if type(parent) == str:
+                parent = deserialized[parent]
+            elif parent is not None:
+                new_path = '{}/parent'.format(path)
+                parent = Scope.deserialize(parent, new_path, deserialized)
+            scope._parent = parent
+
+            # Create the scope's symbol table
+            symbol_table = {}
+            for key, (value, mutable) in obj['symbol_table'].items():
+                if type(value) == str:
+                    symbol_table[key] = (deserialized[value], mutable)
+                elif type(value) == float:
+                    symbol_table[key] = (np.float(value), mutable)
+                elif type(value) == dict:
+                    new_path = '{}/symbol_table/{}'.format(path, key)
+                    func = Function.UserFunction.deserialize(value, new_path, deserialized)
+                    symbol_table[key] = (func, mutable)
+                else:
+                    symbol_table[key] = (value, mutable)
+            scope._symbol_table = symbol_table
+            return scope
+        else:
+            return deserialized[path]

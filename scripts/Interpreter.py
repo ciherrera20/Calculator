@@ -61,6 +61,9 @@ class Interpreter():
         except KeyError:
             return None
 
+    def serialize(self):
+        return self._scope.serialize('.', {})
+
     def _get_AST(self, string):
         tokens = tokenize(string)
         pos_set, tree_dict = program(tokens, 0)
@@ -323,10 +326,13 @@ class Interpreter():
             else:
                 value = np.multiply(value, index)
         return value
+    
+    def get_global_interpreter(interface=False, subscope=None):
+        return Interpreter(Scope.Scope.get_global_scope(interface=interface, subscope=subscope))
 
-def get_global_interpreter(interface=False):
-    return Interpreter(Scope.Scope.get_global_scope(interface=interface))
+    def deserialize(obj):
+        return Scope.Scope.deserialize(obj, '.', {})
 
 interpreter = None
 if __name__ == '__main__':
-    interpreter = get_global_interpreter()
+    interpreter = Interpreter.get_global_interpreter()
