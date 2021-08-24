@@ -219,8 +219,6 @@ unary_op = memoize(label(
 ))
 
 binary_operand = memoize(label(orelse(
-    # lambda *x: unary_operand(*x),
-    # then(unary_op, lambda *x: binary_operand(*x)),
     then(zero_or_more(unary_op), lambda *x: unary_operand(*x)),
     keep=True
 ), label='operand', collapsed=True))

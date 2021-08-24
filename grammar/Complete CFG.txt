@@ -1,4 +1,8 @@
 #------------------------ Basic definitions ------------------------#
+# The stuff in here gets parsed by a lexer into tokens. 
+# I had implemented it fully with the recursive descent parser, 
+# but I kept running into the maximum recursion limit.
+
 # Define a number
 digit = [0-9]
 digits = digit | digit digits
@@ -10,118 +14,91 @@ start_word_char = [a-zA-Z_]
 word_chars = empty | word_char | word_char word_chars
 word = start_word_boundary start_word_char word_chars word_break
 
-# Define name as a sequence of words with periods in between
-name = word | name '.' word
+# Word break and start word boundary are 0 length matches.
+# word_break is equivalent to the regex '\b' while start_word_boundary
+# allows a digit. This is to support implicit multiplication.
+# I don't know how to represent either of these as a language rule,
+# but in the implementation, the parser simply returned the
+# current_label position instead of incrementing the position given to it,
+# which would correspond to matching a terminal. I think this technically
+# makes the grammar context-sensitive? However, since the lexer takes
+# care of it, it doesn't make any practical difference to the rest of
+# the grammar.
 
 # Any character that returns true for python's isspace function
 whitespace_token = \s
-
-# Abbreviated as \s*
 whitespace = empty | whitespace_token | whitespace_token whitespace
 
+#------------------------ Name definitions -------------------------#
+# Define name as a sequence of words with periods in between
+name = word ('.' word)*
+
 #---------------------- Operator definitions -----------------------#
-unary_op = [+-!] | word_break 'not' word_break
+# Words not surrounded by quotes that are not non-terminals are word tokens
+unary_op = [+-!] | not
 
 # The name gives each operator's precedence, with lower numbers being evaluated first
 prec0_op = '^'
 prec1_op = [*/%]
 prec2_op = [+-]
 prec3_op = '<' | '>' | '<=' | '>='
-prec4_op = '==' | '!=' | word_break 'neq' word_break | word_break 'eq' word_break
-prec5_op = word_break 'and' word_break
-prec6_op = word_break 'or' word_break
+prec4_op = '==' | '!=' | neq | eq
+prec5_op = and
+prec6_op = or
+
+#------------------- Binary operand definition ---------------------#
+# Unary operand is defined further down
+binary_operand = (unary_op)* unary_operand
 
 #--------------------- Expression definitions ----------------------#
-# Binary operand is defined further down
-prec0_exp = binary_operand \s* prec0_op binary_operand |
-            prec0_exp \s* prec0_op binary_operand
+# This allows for the parser to automatically detect order of operations
+prec0_exp = binary_operand (prec0_op, binary_operand)*
+prec1_exp = prec0_exp (prec1_op, prec0_exp)*
+prec2_exp = prec1_exp (prec2_op, prec1_exp)*
+prec3_exp = prec2_exp (prec3_op, prec2_exp)*
+prec4_exp = prec3_exp (prec4_op, prec3_exp)*
+prec5_exp = prec4_exp (prec5_op, prec4_exp)*
+prec6_exp = prec5_exp (prec6_op, prec5_exp)*
 
-prec0_lower = prec0_exp
+#--------------------- Expression definitions ----------------------#
+expression = prec6_exp | '(' word_list ')' | empty
 
-prec1_exp = binary_operand \s* prec1_op binary_operand |
-            prec1_exp \s* prec1_op binary_operand |
-            prec0_lower \s* prec1_op binary_operand |
-            binary_operand \s* prec1_op prec0_lower |
-            prec0_lower \s* prec1_op prec0_lower
+wrapped_expression = '(' expression ')'
 
-prec1_lower = prec1_exp | prec0_lower
+expession_list = expression (',' expression)*
 
-prec2_exp = binary_operand \s* prec2_op binary_operand |
-            prec2_exp \s* prec2_op binary_operand |
-            prec1_lower \s* prec2_op binary_operand |
-            binary_operand \s* prec2_op prec1_lower |
-            prec1_lower \s* prec2_op prec1_lower
+wrapped_expression_list = '(' expression_list ')'
 
-prec2_lower = prec2_exp | prec1_lower
+array = '[' (expression_list | expression) ']'
 
-prec3_exp = binary_operand \s* prec3_op binary_operand |
-            prec3_exp \s* prec3_op binary_operand |
-            prec2_lower \s* prec3_op binary_operand |
-            binary_operand \s* prec3_op prec2_lower |
-            prec2_lower \s* prec3_op prec2_lower
+#-------------------- Function call definitions --------------------#
+callable = index | wrapped_expression | name
+callee = '(' ')' | wrapped_expression | wrapped_expression_list
+function_call = callable callee+
 
-prec3_lower = prec3_exp | prec2_lower
-
-prec4_exp = binary_operand \s* prec4_op binary_operand |
-            prec4_exp \s* prec4_op binary_operand |
-            prec3_lower \s* prec4_op binary_operand |
-            binary_operand \s* prec4_op prec3_lower |
-            prec3_lower \s* prec4_op prec3_lower
-
-prec4_lower = prec4_exp | prec3_lower
-
-prec5_exp = binary_operand \s* prec5_op binary_operand |
-            prec5_exp \s* prec5_op binary_operand |
-            prec4_lower \s* prec5_op binary_operand |
-            binary_operand \s* prec5_op prec4_lower |
-            prec4_lower \s* prec5_op prec4_lower
-
-prec5_lower = prec5_exp | prec4_lower
-
-prec6_exp = binary_operand \s* prec6_op binary_operand |
-            prec6_exp \s* prec6_op binary_operand |
-            prec5_lower \s* prec6_op binary_operand |
-            binary_operand \s* prec6_op prec5_lower |
-            prec5_lower \s* prec6_op prec5_lower
-
-prec6_lower = prec6_exp | prec5_lower
+#----------------------- Index definitions -------------------------#
+indexable = function_call | wrapped_expression | array | name
+index = indexable array+
 
 #----------------------- Operand definition ------------------------#
-binary_operand = \s* unary_op binary_operand | unary_operand
+composable_unary_operand =  index |
+                            function_call |
+                            array |
+                            name |
+                            wrapped_expression |
+                            number
 
-unary_operand = \s* number |
-                \s* array |
-                \s* array |
-                wrapped_expression |
-                implicit_mult
+implicit_mult = composable_unary_operand composable_unary_operand+
 
-implicit_mult = \s* number composable_unary_operand |
-                \s* name composable_unary_operand |
-                \s* array composable_unary_operand |
-                wrapped_expression composable_unary_operand |
-                implicit_mult | composable_unary_operand
+unary_operand = implicit_mult | composable_unary_operand
 
-
-wrapped_expression = \s* '(' expression \s* ')'
-
-composable_unary_operand = \s* array
-                           \s* name
-                           function_call
-                           wrapped_expression
-
-expression_list = expression | expression \s* ',' expression_list
-
-array = \s* '[' expression_list \s* ']'
-
-function_call = \s* '(' expression_list \s* ')' | \s* '(' \s* ')'
-
-expression = binary_operand | prec6_lower | wrapped_expression
+word_list = word (',' word)* | empty
 
 #----------------------- Program definition ------------------------#
-word_list = empty | \s* word | \s* word \s* ',' word_list
+function_def = word '(' word_list ')' '=' expression
 
-function_def = \s* word \s* '(' word_list \s* ')' \s* '=' expression
+var_def = (word '=')+ expression
 
-var_def = \s* word \s* '=' expression | \s* word \s* '=' var_def
+line = function_def | var_def | expression
 
-program = expression \s* | function_def \s* | var_def \s*
+program = line (';' line)*

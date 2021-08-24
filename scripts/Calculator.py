@@ -7,14 +7,14 @@ import traceback
 import re
 import asyncio
 import selectors
-import atexit
+# import atexit
 import json
 from Scope import NoNewline
 from Serialize import ProgramEncoder, json_program_obj_hook
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.shortcuts import input_dialog, yes_no_dialog, button_dialog, radiolist_dialog
+from prompt_toolkit.shortcuts import input_dialog, checkboxlist_dialog, radiolist_dialog
 from prompt_toolkit.styles import Style
 
 cwd = os.path.dirname(os.path.realpath(__file__))
@@ -78,7 +78,7 @@ def onexit(load_path=None):
                 text='Please enter the save path',
                 style=dialog_style
             )
-            app.current_buffer.insert_text(os.path.normpath(os.join_path(cwd, 'new_save.calc')))
+            app.current_buffer.insert_text(os.path.normpath(os.path.join(cwd, 'new_save.calc')))
             save_path = app.run()
         if save_path:
             save(save_path)
@@ -97,7 +97,7 @@ def _(event):
 def _(event):
     event.app.current_buffer.insert_text('    ')
 
-atexit.register(onexit)
+# atexit.register(onexit)
 
 if __name__ == '__main__':
     # Find any saves and give the option to load them
