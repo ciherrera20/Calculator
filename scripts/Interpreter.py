@@ -231,7 +231,8 @@ class Interpreter():
                 'operator': self._evaluate_unary_operator
             }) for arg in args[:-1]]
             value = self._evaluate_node(args[-1], self._evaluate_leaf, {
-                'operand': self._evaluate_operand
+                'operand': self._evaluate_operand,
+                'implicit_mult': self._evaluate_implicit_mult
             })
             for op in reversed(ops):
                 value = op(value)
@@ -317,16 +318,29 @@ class Interpreter():
 
         for index in indices:
             if type(value) == np.ndarray:
-                int_array = index.astype(np.int32)
-                equivalent = np.ufunc.reduce(np.logical_and, int_array == index, axis=None)
-                if not equivalent:
-                    raise ValueError('An array can only be indexed with integers')
-                else:
-                    value = value[tuple(int_array)]
+                # int_array = index.astype(np.int32)
+                # equivalent = np.ufunc.reduce(np.logical_and, int_array == index, axis=None)
+                # if not equivalent:
+                #     raise ValueError('An array can only be indexed with integers')
+                # else:
+                #     value = value[tuple(int_array)]
+                int_array = Interpreter.to_ints('An array can only be indexed with integers')
+                value = value[tuple(int_array)]
             else:
                 value = np.multiply(value, index)
         return value
     
+    def to_ints(array, msg):
+        if type(array) == np.ndarray:
+            int_array = array.astype(np.int32)
+            equivalent = np.ufunc.reduce(np.logical_and, int_array == array, axis=None)
+        elif type(array) == float:
+            int_array = int(array)
+            equivalent = int_array == array
+        if not equivalent:
+            raise ValueError(msg)
+        return int_array
+
     def get_global_interpreter(interface=False, subscope=None):
         return Interpreter(Scope.Scope.get_global_scope(interface=interface, subscope=subscope))
 

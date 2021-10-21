@@ -9,6 +9,7 @@ import asyncio
 import selectors
 # import atexit
 import json
+import argparse
 from Scope import NoNewline
 from Serialize import ProgramEncoder, json_program_obj_hook
 from prompt_toolkit import PromptSession
@@ -100,6 +101,10 @@ def _(event):
 # atexit.register(onexit)
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='CLI Calculator')
+    parser.add_argument('-d', '--debug', action='store_true', help='prints abstract syntax trees for inputs')
+    args = parser.parse_args()
+
     # Find any saves and give the option to load them
     saves = find_saves(cwd)
     if len(saves) > 0:
@@ -134,7 +139,12 @@ if __name__ == '__main__':
         # Catch any errors
         try:
             program = session.prompt('{}: '.format(current_line), key_bindings=bindings)
-            result = interpreter.evaluate(program)
+            if args.debug:
+                AST = interpreter._get_AST(program)
+                print(AST)
+                result = interpreter.evaluate_AST(AST)
+            else:
+                result = interpreter.evaluate(program)
         except ValueError as err:
             result = str(err)
         except RecursionError as err:

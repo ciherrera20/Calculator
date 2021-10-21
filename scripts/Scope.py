@@ -178,7 +178,7 @@ class Scope():
 
         # Define the arctan2 function
         Function.BuiltinFunction('arctan2', ['y', 'x'],
-            lambda y, x: np.arctan2(x.eval(), y.eval())
+            lambda y, x: np.arctan2(y.eval(), x.eval())
         ).add_to(scope, mutable=False)
 
         # Define the sqrt function
@@ -190,6 +190,34 @@ class Scope():
         Function.BuiltinFunction('exp', ['x'],
             lambda x: np.exp(x.eval())
         ).add_to(scope, mutable=False)
+
+        # Define the ln function
+        Function.BuiltinFunction('ln', ['x'],
+            lambda x: np.log(x.eval())
+        ).add_to(scope, mutable=False)
+
+        # Define the log function
+        Function.BuiltinFunction('log', ['x'],
+            lambda x: np.log(x.eval()) / np.log(10)
+        ).add_to(scope, mutable=False)
+
+        # Define the log2 function
+        Function.BuiltinFunction('log2', ['x'],
+            lambda x: np.log2(x.eval())
+        ).add_to(scope, mutable=False)
+
+        # Define the log function
+        Function.BuiltinFunction('logb', ['x', 'b'],
+            lambda x, b: np.log(x.eval()) / np.log(b.eval())
+        ).add_to(scope, mutable=False)
+
+        Function.BuiltinFunction('zeros', ['dims'],
+            lambda dims: np.zeros(Interpreter.Interpreter.to_ints(dims.eval(), 'dimensions must be integers'))
+        ).add_to(scope, mutable=False)
+
+        # Function.BuiltinFunction('Ans', ['num'],
+        #     
+        # ).add_to(scope, mutable=False)
 
         if interface:
             def exit():
