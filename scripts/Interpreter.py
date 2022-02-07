@@ -331,7 +331,6 @@ class Interpreter():
         return value
     
     def to_ints(array, msg):
-        print('array:', array)
         if type(array) == np.ndarray:
             int_array = array.astype(np.int32)
             equivalent = np.ufunc.reduce(np.logical_and, int_array == array, axis=None)
