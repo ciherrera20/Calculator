@@ -124,7 +124,7 @@ if __name__ == '__main__':
         
     current_line = 0
     print('Enter expression:')
-    sys.setrecursionlimit(3000)
+    sys.setrecursionlimit(5000)
     line_end_pattern = re.compile(r';\s*$|\S$')
 
     # Create the promp session

@@ -324,13 +324,14 @@ class Interpreter():
                 #     raise ValueError('An array can only be indexed with integers')
                 # else:
                 #     value = value[tuple(int_array)]
-                int_array = Interpreter.to_ints('An array can only be indexed with integers')
+                int_array = Interpreter.to_ints(index, 'An array can only be indexed with integers')
                 value = value[tuple(int_array)]
             else:
                 value = np.multiply(value, index)
         return value
     
     def to_ints(array, msg):
+        print('array:', array)
         if type(array) == np.ndarray:
             int_array = array.astype(np.int32)
             equivalent = np.ufunc.reduce(np.logical_and, int_array == array, axis=None)
