@@ -33,6 +33,7 @@ def find_saves(path):
     for f in dirs:
         if os.path.isfile(os.path.join(cwd, f)) and os.path.splitext(f)[1] == '.calc':
             saves.append(os.path.join(cwd, f))
+    saves = sorted(saves, key=os.path.getmtime, reverse=True)
     return saves
 
 def load(path):
@@ -124,7 +125,7 @@ if __name__ == '__main__':
         
     current_line = 0
     print('Enter expression:')
-    sys.setrecursionlimit(5000)
+    sys.setrecursionlimit(3000)
     line_end_pattern = re.compile(r';\s*$|\S$')
 
     # Create the promp session
