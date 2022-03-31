@@ -64,6 +64,12 @@ class Interpreter():
     def serialize(self):
         return self._scope.serialize('.', {})
 
+    def retrieve_value(self, name):
+        return self._scope.retrieve_value(name)
+
+    def set_value(self, name, value, mutable=True, force=False):
+        return self._scope.set_value(name, value, mutable=mutable, force=force)
+
     def _get_AST(self, string):
         tokens = tokenize(string)
         pos_set, tree_dict = program(tokens, 0)
@@ -145,12 +151,12 @@ class Interpreter():
                 'word_list': self._evaluate_word_list
             })
     
-    def _evaluate_valid_expression(self, error_msg):
+    def _evaluate_valid_expression(self, error_msg, allow_none=False):
         def _evaluator(AST):
             value = self._evaluate_expression(AST)
             if type(value) == list:
                 raise ValueError(error_msg.format(' word list'))
-            elif value is None:
+            elif value is None and not allow_none:
                 raise ValueError(error_msg.format('n empty expression'))
             else:
                 return value
@@ -270,9 +276,17 @@ class Interpreter():
         if len(args) == 1 and args[0] == ():
             return np.array([])
         else:
-            values = [self._evaluate_node(arg, self._evaluate_leaf, {
-                'expression': self._evaluate_valid_expression('A{} cannot be an array element')
-            }) for arg in args]
+            # Allow for empty arrays
+            if len(args) == 1:
+                values = [self._evaluate_node(arg, self._evaluate_leaf, {
+                    'expression': self._evaluate_valid_expression('A{} cannot be an array element', allow_none=True)
+                }) for arg in args]
+                if values[0] == None:
+                    return np.array([])
+            else:
+                values = [self._evaluate_node(arg, self._evaluate_leaf, {
+                    'expression': self._evaluate_valid_expression('A{} cannot be an array element')
+                }) for arg in args]
             return np.array(values)
 
     def _evaluate_param_set(self, *args):

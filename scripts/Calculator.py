@@ -10,6 +10,7 @@ import selectors
 # import atexit
 import json
 import argparse
+import numpy as np
 from Scope import NoNewline
 from Serialize import ProgramEncoder, json_program_obj_hook
 from prompt_toolkit import PromptSession
@@ -169,4 +170,12 @@ if __name__ == '__main__':
                 print(result)
         else:
             print('Enter expression:')
+        
+        # Save answers in a variable
+        answers = interpreter.retrieve_value('ans')
+        if result is None or type(result) == str:
+            answers = np.array(answers.tolist() + [np.nan], dtype=object)
+        else:
+            answers = np.array(answers.tolist() + [result], dtype=object)
+        answers = interpreter.set_value('ans', answers, force=True)
     onexit(save_path)

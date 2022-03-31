@@ -21,9 +21,11 @@ class Scope():
         else:
             raise ValueError('\'{}\' is not defined'.format(name))
     
-    def set_value(self, name, value, mutable=True):
+    def set_value(self, name, value, mutable=True, force=False):
         current_value = self._symbol_table.get(name)
-        if not current_value or (current_value and current_value[1]):
+
+        # If the name is not in the symbol table or it is mutable, set it to the given value
+        if not current_value or current_value[1] or force:
             self._symbol_table[name] = (value, mutable)
         return value
 
@@ -77,6 +79,7 @@ class Scope():
         scope.set_value('False', False, mutable=False)
         scope.set_value('pi', np.pi, mutable=False)
         scope.set_value('e', np.e, mutable=False)
+        scope.set_value('ans', np.array([np.nan], dtype=object), mutable=False)
 
         # Define the lambda function
         def lambda_def(word_list, definition):
@@ -214,10 +217,6 @@ class Scope():
         Function.BuiltinFunction('zeros', ['dims'],
             lambda dims: np.zeros(Interpreter.Interpreter.to_ints(dims.eval(), 'dimensions must be integers'))
         ).add_to(scope, mutable=False)
-
-        # Function.BuiltinFunction('Ans', ['num'],
-        #     
-        # ).add_to(scope, mutable=False)
 
         if interface:
             def exit():
