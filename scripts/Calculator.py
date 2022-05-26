@@ -177,5 +177,5 @@ if __name__ == '__main__':
             answers = np.array(answers.tolist() + [np.nan], dtype=object)
         else:
             answers = np.array(answers.tolist() + [result], dtype=object)
-        answers = interpreter.set_value('ans', answers, force=True)
+        answers = interpreter.get_root_scope().set_value('ans', answers, force=True)
     onexit(save_path)

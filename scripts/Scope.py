@@ -31,7 +31,7 @@ class Scope():
 
     def delete_value(self, name):
         if name in self._symbol_table:
-            value, mutable = self._symbol_table[name]
+            _, mutable = self._symbol_table[name]
             if mutable:
                 del self._symbol_table[name]
                 return True
@@ -72,6 +72,12 @@ class Scope():
         else:
             # Return the memoized path
             return serialized[self]
+
+    def get_root_scope(self):
+        if self._parent is None:
+            return self
+        else:
+            return self._parent.get_root_scope()
 
     def get_global_scope(interface=False, subscope=None):
         scope = Scope(serializable=False)

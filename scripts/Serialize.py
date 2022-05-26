@@ -12,10 +12,12 @@ class ProgramEncoder(json.JSONEncoder):
         If input object is an ndarray, it will be converted into a dict holding dtype, shape, and the data base 64 encoded.
         '''
         if isinstance(obj, np.ndarray):
-            print(obj)
-            data_b64 = base64.b64encode(np.ascontiguousarray(obj).data).decode('ascii')
+            if obj.dtype == np.object:
+                data = obj.tolist()
+            else:
+                data = base64.b64encode(np.ascontiguousarray(obj).data).decode('ascii')
             return {
-                '__ndarray__': data_b64,
+                '__ndarray__': data,
                 'dtype': str(obj.dtype),
                 'shape': obj.shape
             }
@@ -31,8 +33,11 @@ def json_program_obj_hook(dct):
     '''
     if isinstance(dct, dict):
         if '__ndarray__' in dct:
-            data = base64.b64decode(dct['__ndarray__'])
-            return np.frombuffer(data, dct['dtype']).reshape(dct['shape'])
+            if dct['dtype'] == 'object':
+                return np.array(dct['__ndarray__'], dtype=object).reshape(dct['shape'])
+            else:
+                data = base64.b64decode(dct['__ndarray__'])
+                return np.frombuffer(data, dct['dtype']).reshape(dct['shape'])
         elif 'type' in dct:
             return Token(dct['type'], dct['value'])
     return dct

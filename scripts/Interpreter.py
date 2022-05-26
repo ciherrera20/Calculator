@@ -69,6 +69,9 @@ class Interpreter():
 
     def set_value(self, name, value, mutable=True, force=False):
         return self._scope.set_value(name, value, mutable=mutable, force=force)
+    
+    def get_root_scope(self):
+        return self._scope.get_root_scope()
 
     def _get_AST(self, string):
         tokens = tokenize(string)
