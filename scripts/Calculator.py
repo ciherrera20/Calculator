@@ -9,6 +9,7 @@ import asyncio
 import selectors
 # import atexit
 import json
+import yaml
 import argparse
 import numpy as np
 from Scope import NoNewline
@@ -19,27 +20,70 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.shortcuts import input_dialog, checkboxlist_dialog, radiolist_dialog
 from prompt_toolkit.styles import Style
 
-cwd = os.path.dirname(os.path.realpath(__file__))
-# save_path = os.path.join(cwd, './save.calc')
-exit_dialog = True
-dialog_style = Style.from_dict({
+CWD = os.path.dirname(os.path.realpath(__file__))
+SAVE_DIR = os.path.join(os.path.split(CWD)[0], 'saves')
+EXIT_DIALOG = True
+DIALOG_STYLE = Style.from_dict({
     'dialog':             'bg:#88ff88',
     'dialog frame.label': 'bg:#ffffff #000000',
     'dialog':        'bg:#000000',
 })
 
+def find_files(*sources, name=None, extension=None):
+    '''
+    Recursively retrieve files from the given source directories whose names and/or extensions (full)match the given patterns.
+    name: string or regex pattern
+    extension: string or regex pattern
+    Returns a DirEntry generator
+    '''
+    # Compile regexes if needed
+    if name is None:
+        name = re.compile(r'.*')
+    elif type(name) is not re.Pattern:
+        name = re.compile(name)
+    if extension is None:
+        extension = re.compile(r'.*')
+    elif type(extension) is not re.Pattern:
+        extension = re.compile(extension)
+
+    # Keep track of the sources already scanned and the files already found
+    memo_table = {}
+
+    def find_files_helper(*sources):
+        # Search through each source directoty
+        for source in sources:
+            # Get all of the contents of the source directory and search them
+            entries = os.scandir(source)
+            for entry in entries:
+                # Check if the entry has already been scanned or matched
+                normed = os.path.normpath(entry.path)
+                if normed not in memo_table:
+                    memo_table[normed] = True
+                    # If the current entry is itself a directory, search it recursively
+                    if entry.is_dir():
+                        yield from find_files_helper(entry)
+
+                    # Otherwise yield entries whose name matches the name pattern and whose extension matches the extension pattern
+                    else:
+                        # Return only entries that have not already been found
+                        filename, fileext = os.path.splitext(entry.name)
+                        if name.fullmatch(filename) is not None and \
+                        extension.fullmatch(fileext) is not None:
+                            yield entry
+            entries.close()
+    return find_files_helper(*sources)
+
 def find_saves(path):
     dirs = os.listdir(path)
     saves = []
     for f in dirs:
-        if os.path.isfile(os.path.join(cwd, f)) and os.path.splitext(f)[1] == '.calc':
-            saves.append(os.path.join(cwd, f))
+        if os.path.isfile(os.path.join(SAVE_DIR, f)) and os.path.splitext(f)[1] == '.calc':
+            saves.append(os.path.join(SAVE_DIR, f))
     saves = sorted(saves, key=os.path.getmtime, reverse=True)
     return saves
 
 def load(path):
     if os.path.isfile(path):
-        # print('Save file exists at', {save_path})
         f = open(path, 'r')
         try:
             scope = Interpreter.Interpreter.deserialize(json.load(f, object_hook=json_program_obj_hook))
@@ -56,11 +100,11 @@ def save(path):
     f.close()
 
 def onexit(load_path=None):
-    global exit_dialog
+    global EXIT_DIALOG
     # Give the option to save the scope before exiting
-    if exit_dialog:
+    if EXIT_DIALOG:
         NEW_SAVE = 1
-        exit_dialog = False
+        EXIT_DIALOG = False
 
         values = []
         if load_path:
@@ -69,22 +113,45 @@ def onexit(load_path=None):
             ]
         values.append((NEW_SAVE, 'New save file'))
 
+        # Give the user the option to save their work
         save_path = radiolist_dialog(
             title='Save',
             text='Would you like to save your work?',
             values=values,
-            style=dialog_style
+            style=DIALOG_STYLE
         ).run()
         if save_path == NEW_SAVE:
             app = input_dialog(
                 title='New save',
                 text='Please enter the save path',
-                style=dialog_style
+                style=DIALOG_STYLE
             )
-            app.current_buffer.insert_text(os.path.normpath(os.path.join(cwd, 'new_save.calc')))
+            app.current_buffer.insert_text(os.path.normpath(os.path.join(SAVE_DIR, 'new_save.calc')))
             save_path = app.run()
         if save_path:
-            save(save_path)
+            # Repeat the user prompt as many times as necessary if the given path is incorrect
+            done_saving = False
+            while not done_saving:
+                # If the given save path is not a file, give the user the option to correct it
+                if os.path.split(save_path)[1] == '':
+                    app = input_dialog(
+                        title='New save',
+                        text='Given path was not to a file. Please enter a corrected save path',
+                        style=DIALOG_STYLE
+                    )
+                    app.current_buffer.insert_text(save_path)
+                    save_path = app.run()
+
+                    # If the user did not provide a save path, break out of the loop
+                    if not save_path:
+                        done_saving = True
+                else:
+                    # Add the proper extension if necessary and save
+                    save_name, save_ext = os.path.splitext(save_path)
+                    if save_ext != '.calc':
+                        save_path = '{}.calc'.format(save_name)
+                    save(save_path)
+                    done_saving = True
 
 selector = selectors.SelectSelector()
 loop = asyncio.SelectorEventLoop(selector)
@@ -105,16 +172,29 @@ def _(event):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='CLI Calculator')
     parser.add_argument('-d', '--debug', action='store_true', help='prints abstract syntax trees for inputs')
+    parser.add_argument('-c', '--config', help='Name of the config yaml file to use', default='../config.yml')
     args = parser.parse_args()
 
+    # Retrieve save files from configuration file if possible, falling back to the default save path if necessary
+    saves = []
+    config_path = os.path.join(CWD, args.config)
+    if os.path.isfile(config_path):
+        config = yaml.safe_load(open(config_path, 'r'))
+        basepath = os.path.dirname(config_path)
+        if 'dirs' in config:
+            save_dirs = [os.path.join(basepath, save_dir) for save_dir in config['dirs']] + [SAVE_DIR]
+        else:
+            save_dirs = [SAVE_DIR]
+        saves = list(find_files(*save_dirs, extension=r'\.calc'))
+
     # Find any saves and give the option to load them
-    saves = find_saves(cwd)
+    # saves = find_saves(SAVE_DIR)
     if len(saves) > 0:
         save_path = radiolist_dialog(
             title='Load',
             text='The following save files were found. Which would you like to load?',
             values=[(save, os.path.split(save)[1]) for save in saves],
-            style=dialog_style
+            style=DIALOG_STYLE
         ).run()
     else:
         save_path = None

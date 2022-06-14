@@ -1,0 +1,4 @@
+# Specify the directories where the calculator will search for save files
+dirs: [
+  saves
+]
