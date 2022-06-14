@@ -157,6 +157,7 @@ if __name__ == '__main__':
         except IndexError as err:
             result = str(err)
         except NoNewline:
+            result = None
             newline = False
         except:
             result = traceback.print_exc()
